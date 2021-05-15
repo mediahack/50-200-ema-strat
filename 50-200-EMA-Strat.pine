@@ -1,0 +1,210 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © mediahack
+
+//@version=4
+strategy("50/200 EMA Bounce Strategy", overlay=true, calc_on_every_tick=true)
+
+var float i_accountBalance = input(100.00, "Account Balance")
+var float accountBalance = i_accountBalance
+var crossType = array.new_int(0)
+var int crossCount = 0
+var bool ema50Valid = true
+var bool ema200Valid = true
+var longCandidateFound = false
+var longCandidateConfirmed = false
+var shortCandidateFound = false
+var shortCandidateConfirmed = false
+var float limit = 0.0
+var float takeProfit = 0.0
+var float stopLoss = 0.0
+var bool isLong = false
+var bool isShort = false
+var bool currentCrossOverAlreadyPlayed = false
+    
+var atr = tr(true)
+
+src=close
+
+bullish = open < close
+previousCandleBullish = open[1] < close[1] 
+ema50 = ema(src, 50)
+ema200 = ema(src, 200)
+
+if crossover(ema50, ema200)
+    array.push(crossType, 1)
+    crossCount := crossCount+1
+    ema50Valid := true // every cross over we reset
+
+if crossunder(ema50, ema200)
+    array.push(crossType, 0)
+    crossCount := crossCount+1
+    ema50Valid := true // every cross under we reset
+
+plot(ema50, title="ema 50", color=color.yellow)
+plot(ema200, title="ema 200", color=color.white)
+
+start = timestamp(2021, 4, 28, 0, 0, 0)
+end = timestamp(2021, 5, 8, 0, 0, 0)
+
+plot(crossover(ema50, ema200) ? ema200 : na, title="Golden Cross", style=plot.style_cross, color=color.green, linewidth=5, transp=0, display=display.all)
+plot(crossunder(ema50, ema200) ? ema200 : na, title='Death Cross', style=plot.style_cross, color=color.red, linewidth=5, transp=15)
+
+bodyIntersectBull = ema50Valid ? (close > ema50 and open < ema50) and (open < ema50 and close > ema50) : na
+bodyIntersectBear = ema50Valid ? open >= ema50 and close <= ema50 : na
+prevCandleBull = open[1] < close[1]
+prevCandleBear = open[1] > close[1]
+
+
+
+didWick(ema) =>
+    wicked = false
+    
+    // bullish wick down
+    if close > open and open >= ema and low <= ema
+        wicked := true
+    // bullish wick up
+    if close > open and close <= ema and high >= ema
+        wicked := true
+    // bearish wick down
+    if open > close and close >= ema and low <= ema
+        wicked := true
+    // bearish wick up
+    if open > close and open <= ema and high >= ema
+        wicked := true
+        
+    wicked
+
+printThreeGreenOnEma() =>
+    threeGreen = true
+    // one candle back, does it print on the line or above it
+    if (open[1] <= ema50 and close[1] >= ema50) or (open[1] >= ema50 and close[1] > ema50)
+        threeGreen := false
+    // two candles back, does it print on the line or above it    
+    if (open[2] <= ema50 and close[2] >= ema50) or (open[2] >= ema50 and close[2] > ema50)
+        threeGreen := false
+    // two candles back, does it print on the line or above it    
+    if (open[3] <= ema50 and close[3] >= ema50) or (open[3] >= ema50 and close[3] > ema50)
+        threeGreen := false    
+        
+    threeGreen
+
+drawTradeLines() =>
+    line.new(x1=bar_index[1], x2=bar_index, y1=loss, y2=loss, color=color.red, width=2)
+    line.new(x1=bar_index[1], x2=bar_index, y1=entry, y2=entry, color=color.blue, width=2)
+    line.new(x1=bar_index[1], x2=bar_index, y1=profit, y2=profit, color=color.green, width=2)
+
+exitLongTrade() =>
+    if low <= loss
+        strategy.exit("exit", "long",loss=loss)
+    if high >= profit
+        strategy.exit("exit", "long",profit=profit)
+
+checkForLongTrade() =>
+    valid = false
+    if bullish and strategy.position_size == 0
+        if high >= entry or close >= entry
+            valid := true
+    valid
+
+startLongTrade(loss, profit, top) =>
+    
+    content = "ATR: " + tostring(atr) + "\nEntry: " + tostring(entry) + "\nTP: "+ tostring(profit) + "\nSL: " + tostring(loss)
+    details = label.new(bar_index, na)
+    label.set_text(details, content)
+    label.set_yloc(details, top ? yloc.belowbar : yloc.abovebar)
+    label.set_color(details, color.green)
+    label.set_style(details, top ? label.style_label_up : label.style_label_down)
+    
+    strategy.entry("long", strategy.long, limit=entry, when=time > start and high >= entry)
+
+
+
+// First make sure the array isn't empty 
+if array.size(crossType) > 0 
+    // Make sure that the current cross type is a cross over (1)
+    if array.get(crossType, crossCount - 1) == 1 and ema50Valid
+        test = 1
+        // isLong := true
+        // isShort := false
+        
+        // // first lets make sure we didn't wick the ema 50
+        // ema50Valid := not didWick(ema50)
+            
+        // // label.new(bar_index, y=high, color=color.green, text=ema50Valid? "valid": "bad", style=label.style_label_down)
+        
+        // // If we wicked, reset the variables responsible for tracking
+        // if not ema50Valid
+        //     longCandidateFound := false
+            
+        // // The body will be a bearish printing candle on the 50
+        // longCandidateFound := ema50Valid and not longCandidateFound and bodyIntersectBear
+    
+        // longCandidateConfirmed := longCandidateFound and prevCandleBear 
+        
+
+// plotshape(bodyIntersectBull and not previousCandleBullish, title="bullish", style=shape.square, color=color.blue)
+// plotshape(bodyIntersectBear, style=shape.square, title="bearish", color=color.white)
+
+
+
+if array.size(crossType) > 0
+    if array.get(crossType, crossCount -1) == 0 and ema50Valid
+        
+        // first lets make sure we didn't wick the ema 50
+        ema50Valid := not didWick(ema50)
+            
+        // If we wicked, reset the variables responsible for tracking
+        if not ema50Valid
+            shortCandidateFound := false
+            
+        // The body will be a bullish printing candle on the 50
+        shortCandidateFound := ema50Valid and not shortCandidateFound and bodyIntersectBull
+    
+        shortCandidateConfirmed := shortCandidateFound and prevCandleBull
+
+// Show the candidate
+plotshape(shortCandidateConfirmed, style=shape.square, title="bearish", color=color.white)
+plotshape( shortCandidateFound, title="short candidate found", style=shape.diamond, color=color.blue)  
+
+entry = 0.0
+
+
+if shortCandidateConfirmed
+    isShort := true
+    var qty = accountBalance / close
+    limit := bullish ? close :  open
+    stopLoss := close + (atr * 2) // Difference from closing price of the candle and 2x the ATR.
+    takeProfit := close - abs((open - stopLoss)*1.5) //Whatever the distance from close to the SL and subtract it from the close with 1.5R
+    //atr := 0.0023
+
+    shit = "ATR: " + tostring(atr) + ", Entry: " + tostring(close) + ", TP: "+ tostring(takeProfit) + ", SL: " + tostring(stopLoss)
+    details = label.new(bar_index, na)
+    label.set_text(details, shit)
+    label.set_yloc(details, yloc.belowbar)
+    label.set_color(details, color.green)
+    label.set_style(details, label.style_label_up)
+    // label.new(bar_index, y=stopLoss, color=color.red, text="SL: "+tostring(stopLoss))
+    // label.new(bar_index, y=takeProfit, color=color.green, text="ATR: + " + tostring(atr) + ", TP: "+tostring(takeProfit), style=label.style_label_up)
+    
+    // lets open our short
+    strategy.entry("short", strategy.short, qty=qty, limit=close, when=time > start)
+    
+
+if high >= stopLoss
+    strategy.exit("exit", "short", profit=takeProfit, loss=stopLoss)
+    
+if low <= takeProfit
+    strategy.exit("exit", "short", profit=takeProfit, loss=stopLoss)
+
+if high > stopLoss and low > takeProfit
+    line.new(x1=bar_index[1], x2=bar_index, y1=stopLoss, y2=stopLoss, color=color.red)
+    line.new(x1=bar_index[1], x2=bar_index, y1=close, y2=close, color=color.blue)
+    line.new(x1=bar_index[1], x2=bar_index, y1=takeProfit, y2=takeProfit, color=color.green)
+
+    
+// lets reset
+if isShort
+    ema50Valid := false // ema is not invalidated, but we want to reset it until next crossover
+    shortCandidateFound := false
+    shortCandidateConfirmed := false
+    isShort := false
