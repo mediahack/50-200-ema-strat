@@ -2,96 +2,105 @@
 // © mediahack
 
 //@version=4
-strategy("50/200 EMA Bounce Strategy", overlay=true, calc_on_every_tick=true)
+strategy("Scratch pad", overlay=true, calc_on_order_fills=true)
 
+// Global vars available from candle to candle
 var float i_accountBalance = input(100.00, "Account Balance")
 var float accountBalance = i_accountBalance
 var crossType = array.new_int(0)
 var int crossCount = 0
-var bool ema50Valid = true
-var bool ema200Valid = true
-var longCandidateFound = false
-var longCandidateConfirmed = false
-var shortCandidateFound = false
-var shortCandidateConfirmed = false
-var float limit = 0.0
-var float takeProfit = 0.0
-var float stopLoss = 0.0
-var bool isLong = false
-var bool isShort = false
-var bool currentCrossOverAlreadyPlayed = false
-    
-var atr = tr(true)
+var currentCrossoverDead = false // this is important because if its dead we want to skip any checks until the next cross over.
+var isLong = false
+var isShort = false
+var entry = 0.0
+var profit = 0.0
+var loss = 0.0
+var qty = 100
+var activeTrade = false
+var labelUp = false // for alternating labels on trades
+var wickedCount = 0
 
-src=close
+// Debugging
+var showTradeLabels = true
+var showTradeLines = false
+var start = timestamp(2021, 4, 28, 0, 0, 0)
 
-bullish = open < close
-previousCandleBullish = open[1] < close[1] 
+// Vars that change per candle
+src = close
+atr = atr(14) 
 ema50 = ema(src, 50)
 ema200 = ema(src, 200)
+bullish = open < close
+bearish = open > close 
 
+
+// Lets start our testing. 
+
+// CROSSOVERS ==================================================================
 if crossover(ema50, ema200)
     array.push(crossType, 1)
     crossCount := crossCount+1
-    ema50Valid := true // every cross over we reset
+    currentCrossoverDead := false
+    wickedCount := 0
 
 if crossunder(ema50, ema200)
     array.push(crossType, 0)
     crossCount := crossCount+1
-    ema50Valid := true // every cross under we reset
+    currentCrossoverDead := false
+    wickedCount := 0
 
+// Draw'em!
 plot(ema50, title="ema 50", color=color.yellow)
-plot(ema200, title="ema 200", color=color.white)
-
-start = timestamp(2021, 4, 28, 0, 0, 0)
-end = timestamp(2021, 5, 8, 0, 0, 0)
-
 plot(crossover(ema50, ema200) ? ema200 : na, title="Golden Cross", style=plot.style_cross, color=color.green, linewidth=5, transp=0, display=display.all)
+
+plot(ema200, title="ema 200", color=color.white)
 plot(crossunder(ema50, ema200) ? ema200 : na, title='Death Cross', style=plot.style_cross, color=color.red, linewidth=5, transp=15)
 
-bodyIntersectBull = ema50Valid ? (close > ema50 and open < ema50) and (open < ema50 and close > ema50) : na
-bodyIntersectBear = ema50Valid ? open >= ema50 and close <= ema50 : na
-prevCandleBull = open[1] < close[1]
-prevCandleBear = open[1] > close[1]
+// Methods =====================================================================
+printsOnEma(ema) =>
+    prints = false
 
+    if bullish
+        if open <= ema and close >= ema
+            prints := true
 
+    if bearish
+        if open >= ema and close <= ema
+            prints := true
+
+    prints    
 
 didWick(ema) =>
     wicked = false
-    
+
     // bullish wick down
-    if close > open and open >= ema and low <= ema
+    if bullish and open >= ema and low <= ema
         wicked := true
     // bullish wick up
-    if close > open and close <= ema and high >= ema
+    if bullish and close <= ema and high >= ema
         wicked := true
     // bearish wick down
-    if open > close and close >= ema and low <= ema
+    if bearish and close > ema and low < ema
         wicked := true
     // bearish wick up
-    if open > close and open <= ema and high >= ema
+    if bearish and open < ema and high > ema
         wicked := true
-        
+
     wicked
 
-printThreeGreenOnEma() =>
-    threeGreen = true
-    // one candle back, does it print on the line or above it
-    if (open[1] <= ema50 and close[1] >= ema50) or (open[1] >= ema50 and close[1] > ema50)
-        threeGreen := false
-    // two candles back, does it print on the line or above it    
-    if (open[2] <= ema50 and close[2] >= ema50) or (open[2] >= ema50 and close[2] > ema50)
-        threeGreen := false
-    // two candles back, does it print on the line or above it    
-    if (open[3] <= ema50 and close[3] >= ema50) or (open[3] >= ema50 and close[3] > ema50)
-        threeGreen := false    
-        
-    threeGreen
-
 drawTradeLines() =>
-    line.new(x1=bar_index[1], x2=bar_index, y1=loss, y2=loss, color=color.red, width=2)
-    line.new(x1=bar_index[1], x2=bar_index, y1=entry, y2=entry, color=color.blue, width=2)
-    line.new(x1=bar_index[1], x2=bar_index, y1=profit, y2=profit, color=color.green, width=2)
+    if showTradeLines 
+        line.new(x1=bar_index[1], x2=bar_index, y1=loss, y2=loss, color=color.red, width=2)
+        line.new(x1=bar_index[1], x2=bar_index, y1=entry, y2=entry, color=color.blue, width=2)
+        line.new(x1=bar_index[1], x2=bar_index, y1=profit, y2=profit, color=color.green, width=2)
+        
+drawTradeLabel(dir) =>    
+    content = dir + "\nATR: " + tostring(atr) + "\nEntry: " + tostring(entry) + "\nTP: "+ tostring(profit) + "\nSL: " + tostring(loss)
+    details = label.new(bar_index, na)
+    label.set_text(details, content)
+    label.set_yloc(details, labelUp ? yloc.belowbar : yloc.abovebar)
+    label.set_color(details, color.green)
+    label.set_style(details, labelUp ? label.style_label_up : label.style_label_down)
 
 exitLongTrade() =>
     if low <= loss
@@ -99,112 +108,173 @@ exitLongTrade() =>
     if high >= profit
         strategy.exit("exit", "long",profit=profit)
 
-checkForLongTrade() =>
+emaBetweenBearishFullRange (idx, ema) =>
     valid = false
-    if bullish and strategy.position_size == 0
-        if high >= entry or close >= entry
-            valid := true
+
+    if high >= ema and open[idx] >= ema and low[idx] <= ema and close[idx] <= ema
+        valid := true
+        
     valid
 
-startLongTrade(loss, profit, top) =>
+checkForLongCandidate () =>
+    valid = false
+
+    // Is this candle bullish
+    if open < close
+        // Previous candle must: 
+        // 1. be bearish
+        // 2. have its body print on the ema50
+        if (close[1] < open[1]) and (open[1] >= ema50 and close[1] <= ema50 )
+            valid := true
+
+    valid    
+
+checkForLongTrade() =>
+    valid = false
     
-    content = "ATR: " + tostring(atr) + "\nEntry: " + tostring(entry) + "\nTP: "+ tostring(profit) + "\nSL: " + tostring(loss)
-    details = label.new(bar_index, na)
-    label.set_text(details, content)
-    label.set_yloc(details, top ? yloc.belowbar : yloc.abovebar)
-    label.set_color(details, color.green)
-    label.set_style(details, top ? label.style_label_up : label.style_label_down)
+    if bullish and strategy.position_size == 0    
+        // if high >= entry or close >= entry
+        valid := true
+
+    valid
+    
+setupLongOpportunity() => 
+    // entry
+    e = close   
+    // stop loss
+    sl = e - atr*2 // 
+    // take profit
+    tp = e + abs(e - sl)*1.5
+    
+    [e, sl, tp]
+    
+startLongTrade() =>
+    if showTradeLabels
+        drawTradeLabel("Long")
     
     strategy.entry("long", strategy.long, limit=entry, when=time > start and high >= entry)
 
+checkForShortCandidate() =>
+    valid = false
 
+    // Is this candle bearish
+    if close < open
+        // Previous candle must: 
+        // 1. be bullish
+        // 2. have its body print on the ema50
+        if (close[1] > open[1]) and (open[1] <= ema50 and close[1] >= ema50 )
+            valid := true
 
+    valid    
+
+checkForShortTrade() =>
+    valid = false
+    
+    if close < open and strategy.position_size == 0    
+        // if high >= entry or close >= entry
+        valid := true
+
+    valid
+    
+setupShortOpportunity() => 
+    // entry
+    e = open[1]   
+    // stop loss
+    sl = e + atr*2 // 
+    // take profit
+    tp = e - abs(e - sl)*1.5
+    
+    [e, sl, tp]
+
+exitShortTrade() =>
+    if low <= profit or open <= profit
+        strategy.exit("exit", "short", profit=profit)
+    if high >= loss or close >= loss
+        strategy.exit("exit", "short", loss=loss)
+
+startShortTrade() =>
+    // if showTradeLabels
+    //     drawTradeLabel("Short")
+
+    strategy.entry("short", false, limit=entry, when=time > start) 
+    // strategy.order("short", false, limit=entry, when=time > start) 
+
+sendAlert(dir, e, tp, sl) => 
+    alertMsg = dir + " e: " + tostring(e) + ", tp: " + tostring(tp) + ", sl: " + tostring(sl)
+    alert(alertMsg, alert.freq_all)
+
+// Run the strategy ============================================================
+// Check for golden cross over 50/200
 // First make sure the array isn't empty 
-if array.size(crossType) > 0 
+// Check to see if the current EMA is still valid. If it has been wicked, its no good.
+if strategy.position_size == 0
+    if not currentCrossoverDead and (not isLong or not isShort)
+        currentCrossoverDead := didWick(ema50)
+    
+    if currentCrossoverDead and (not isLong or not isShort)
+        wickedCount := wickedCount + 1
+
+plotshape(currentCrossoverDead and wickedCount == 1, style=shape.xcross, color=color.red, size=size.large)
+    
+// Crossover must be valid and we have to have golden crossed over once
+if not currentCrossoverDead and array.size(crossType) > 0 
     // Make sure that the current cross type is a cross over (1)
-    if array.get(crossType, crossCount - 1) == 1 and ema50Valid
-        test = 1
-        // isLong := true
-        // isShort := false
+    if array.get(crossType, crossCount - 1) == 1 
         
-        // // first lets make sure we didn't wick the ema 50
-        // ema50Valid := not didWick(ema50)
-            
-        // // label.new(bar_index, y=high, color=color.green, text=ema50Valid? "valid": "bad", style=label.style_label_down)
+        // Do we have an existing trade going
+        if checkForLongCandidate() and strategy.position_size == 0
+            [e, sl, tp] = setupLongOpportunity()
+            entry := e
+            loss := sl
+            profit := tp
+
+            // We found a candidate, so lets invalidate the EMA so we won't register other events
+            currentCrossoverDead := true
         
-        // // If we wicked, reset the variables responsible for tracking
-        // if not ema50Valid
-        //     longCandidateFound := false
+            sendAlert("long", e, tp, sl)
+            startLongTrade()
+            isLong := true
+
+            drawTradeLines()
+            labelUp := not labelUp
+
+// Check for death cross 200/50
+// Crossover must be valid and we have to have golden crossed over once
+if not currentCrossoverDead and array.size(crossType) > 0 
+    // Make sure that the current cross type is a cross over (1)
+    if array.get(crossType, crossCount - 1) == 0
+        // Do we have an existing trade going
+        if checkForShortCandidate() and strategy.position_size == 0
+            [e, sl, tp] = setupShortOpportunity()
+            entry := e
+            loss := sl
+            profit := tp
+
+            // We found a candidate, so lets invalidate the EMA so we won't register other events
+            currentCrossoverDead := true
             
-        // // The body will be a bearish printing candle on the 50
-        // longCandidateFound := ema50Valid and not longCandidateFound and bodyIntersectBear
-    
-        // longCandidateConfirmed := longCandidateFound and prevCandleBear 
-        
+            sendAlert("short", e, tp, sl)
+            startShortTrade()
+            isShort := true
 
-// plotshape(bodyIntersectBull and not previousCandleBullish, title="bullish", style=shape.square, color=color.blue)
-// plotshape(bodyIntersectBear, style=shape.square, title="bearish", color=color.white)
+            drawTradeLines()
+            labelUp := not labelUp
 
+// we are in a long
+if isLong and strategy.position_size > 0
 
+    if high >= profit or low <= loss
+        // always be ready to exit the long    
+        exitLongTrade()
+        drawTradeLines()
+        isLong := false
 
-if array.size(crossType) > 0
-    if array.get(crossType, crossCount -1) == 0 and ema50Valid
-        
-        // first lets make sure we didn't wick the ema 50
-        ema50Valid := not didWick(ema50)
-            
-        // If we wicked, reset the variables responsible for tracking
-        if not ema50Valid
-            shortCandidateFound := false
-            
-        // The body will be a bullish printing candle on the 50
-        shortCandidateFound := ema50Valid and not shortCandidateFound and bodyIntersectBull
-    
-        shortCandidateConfirmed := shortCandidateFound and prevCandleBull
+// we are in a short
+if isShort and strategy.position_size < 0
 
-// Show the candidate
-plotshape(shortCandidateConfirmed, style=shape.square, title="bearish", color=color.white)
-plotshape( shortCandidateFound, title="short candidate found", style=shape.diamond, color=color.blue)  
+    if high >= loss or low <= profit
+        // always be ready to exit the long    
+        exitShortTrade()
+        drawTradeLines()
+        isShort := false
 
-entry = 0.0
-
-
-if shortCandidateConfirmed
-    isShort := true
-    var qty = accountBalance / close
-    limit := bullish ? close :  open
-    stopLoss := close + (atr * 2) // Difference from closing price of the candle and 2x the ATR.
-    takeProfit := close - abs((open - stopLoss)*1.5) //Whatever the distance from close to the SL and subtract it from the close with 1.5R
-    //atr := 0.0023
-
-    shit = "ATR: " + tostring(atr) + ", Entry: " + tostring(close) + ", TP: "+ tostring(takeProfit) + ", SL: " + tostring(stopLoss)
-    details = label.new(bar_index, na)
-    label.set_text(details, shit)
-    label.set_yloc(details, yloc.belowbar)
-    label.set_color(details, color.green)
-    label.set_style(details, label.style_label_up)
-    // label.new(bar_index, y=stopLoss, color=color.red, text="SL: "+tostring(stopLoss))
-    // label.new(bar_index, y=takeProfit, color=color.green, text="ATR: + " + tostring(atr) + ", TP: "+tostring(takeProfit), style=label.style_label_up)
-    
-    // lets open our short
-    strategy.entry("short", strategy.short, qty=qty, limit=close, when=time > start)
-    
-
-if high >= stopLoss
-    strategy.exit("exit", "short", profit=takeProfit, loss=stopLoss)
-    
-if low <= takeProfit
-    strategy.exit("exit", "short", profit=takeProfit, loss=stopLoss)
-
-if high > stopLoss and low > takeProfit
-    line.new(x1=bar_index[1], x2=bar_index, y1=stopLoss, y2=stopLoss, color=color.red)
-    line.new(x1=bar_index[1], x2=bar_index, y1=close, y2=close, color=color.blue)
-    line.new(x1=bar_index[1], x2=bar_index, y1=takeProfit, y2=takeProfit, color=color.green)
-
-    
-// lets reset
-if isShort
-    ema50Valid := false // ema is not invalidated, but we want to reset it until next crossover
-    shortCandidateFound := false
-    shortCandidateConfirmed := false
-    isShort := false
